@@ -294,7 +294,7 @@ public class MultiImageChooserActivity extends Activity implements OnItemClickLi
     public void selectClicked(View ignored) {
         ((TextView) getActionBar().getCustomView().findViewById(fakeR.getId("id", "actionbar_done_textview"))).setEnabled(false);
         getActionBar().getCustomView().findViewById(fakeR.getId("id", "actionbar_done")).setEnabled(false);
-        progress.show();
+        // progress.show();
         Intent data = new Intent();
         if (fileNames.isEmpty()) {
             this.setResult(RESULT_CANCELED);
