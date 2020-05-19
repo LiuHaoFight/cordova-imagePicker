@@ -124,7 +124,7 @@
 
             //defaultRepresentation returns image as it appears in photo picker, rotated and sized,
             //so use UIImageOrientationUp when creating our image below.
-            if (picker.returnsOriginalImage) {
+            if (!picker.returnsOriginalImage) {
                 imgRef = [assetRep fullResolutionImage];
                 orientation = [assetRep orientation];
             } else {
