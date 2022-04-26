@@ -10,10 +10,13 @@
 #import "ELCAlbumPickerController.h"
 #import "ELCImagePickerController.h"
 #import "ELCAssetTablePicker.h"
+#import <Photos/Photos.h>
+#import <PhotosUI/PhotosUI.h>
+@import MobileCoreServices;
 
 #define CDV_PHOTO_PREFIX @"cdv_photo_"
 
-@interface SOSPicker ()
+@interface SOSPicker ()<PHPickerViewControllerDelegate>
 
 @property (nonatomic, strong) ALAssetsLibrary *specialLibrary;
 
@@ -25,6 +28,7 @@
 
 @synthesize callbackId;
 
+
 - (void)getPictures:(CDVInvokedUrlCommand *)command {
     NSDictionary *options = [command.arguments objectAtIndex:0];
 
@@ -34,48 +38,59 @@
     self.quality = [[options objectForKey:@"quality"] integerValue];
 
     self.callbackId = command.callbackId;
-
-    // Create the an album controller and image picker
-    ELCAlbumPickerController *albumController = [[ELCAlbumPickerController alloc] init];
-
-    if (maximumImagesCount == 1) {
-        albumController.immediateReturn = true;
-        albumController.singleSelection = true;
-        ALAssetsLibrary *library = [[ALAssetsLibrary alloc] init];
-        self.specialLibrary = library;
-        NSMutableArray *groups = [NSMutableArray array];
-        [_specialLibrary enumerateGroupsWithTypes:ALAssetsGroupSavedPhotos
-            usingBlock:^(ALAssetsGroup *group, BOOL *stop) {
-              if (group) {
-                  [groups addObject:group];
-              } else {
-                  // this is the end
-                  [self displayPickerForGroup:[groups objectAtIndex:0]];
-              }
-            }
-            failureBlock:^(NSError *error) {
-              self.chosenImages = nil;
-              UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Error" message:[NSString stringWithFormat:@"Album Error: %@ - %@", [error localizedDescription], [error localizedRecoverySuggestion]] delegate:nil cancelButtonTitle:@"Ok" otherButtonTitles:nil];
-              [alert show];
-
-              NSLog(@"A problem occured %@", [error description]);
-              // an error here means that the asset groups were inaccessable.
-              // Maybe the user or system preferences refused access.
-            }];
-    } else {
-        albumController.immediateReturn = false;
-        albumController.singleSelection = false;
-        ELCImagePickerController *imagePicker = [[ELCImagePickerController alloc] initWithRootViewController:albumController];
-        imagePicker.maximumImagesCount = maximumImagesCount;
-        imagePicker.returnsOriginalImage = 1;
-        imagePicker.imagePickerDelegate = self;
-
-        albumController.parent = imagePicker;
-
-        // Present modally
-        [self.viewController presentViewController:imagePicker
+    if (@available(iOS 14.0, *)) {
+        PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
+        config.selectionLimit = 1;
+        config.filter = [PHPickerFilter imagesFilter];
+        
+        PHPickerViewController *pickerViewController = [[PHPickerViewController alloc] initWithConfiguration:config];
+        pickerViewController.delegate = self;
+        [self.viewController presentViewController:pickerViewController
                                           animated:YES
                                         completion:nil];
+    } else {
+        // Create the an album controller and image picker
+        ELCAlbumPickerController *albumController = [[ELCAlbumPickerController alloc] init];
+
+        if (maximumImagesCount == 1) {
+            albumController.immediateReturn = true;
+            albumController.singleSelection = true;
+            ALAssetsLibrary *library = [[ALAssetsLibrary alloc] init];
+            self.specialLibrary = library;
+            NSMutableArray *groups = [NSMutableArray array];
+            [_specialLibrary enumerateGroupsWithTypes:ALAssetsGroupSavedPhotos
+                usingBlock:^(ALAssetsGroup *group, BOOL *stop) {
+                  if (group) {
+                      [groups addObject:group];
+                  } else {
+                      // this is the end
+                      [self displayPickerForGroup:[groups objectAtIndex:0]];
+                  }
+                }
+                failureBlock:^(NSError *error) {
+                  self.chosenImages = nil;
+                  UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Error" message:[NSString stringWithFormat:@"Album Error: %@ - %@", [error localizedDescription], [error localizedRecoverySuggestion]] delegate:nil cancelButtonTitle:@"Ok" otherButtonTitles:nil];
+                  [alert show];
+
+                  NSLog(@"A problem occured %@", [error description]);
+                  // an error here means that the asset groups were inaccessable.
+                  // Maybe the user or system preferences refused access.
+                }];
+        } else {
+            albumController.immediateReturn = false;
+            albumController.singleSelection = false;
+            ELCImagePickerController *imagePicker = [[ELCImagePickerController alloc] initWithRootViewController:albumController];
+            imagePicker.maximumImagesCount = maximumImagesCount;
+            imagePicker.returnsOriginalImage = 1;
+            imagePicker.imagePickerDelegate = self;
+
+            albumController.parent = imagePicker;
+
+            // Present modally
+            [self.viewController presentViewController:imagePicker
+                                              animated:YES
+                                            completion:nil];
+        }
     }
 }
 
@@ -206,4 +221,51 @@
     return newImage;
 }
 
+#pragma mark - PHPicker
+
+-(void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results{
+    if (@available(iOS 14.0, *)) {
+    NSLog(@"-picker:%@ didFinishPicking:%@", picker, results);
+    NSString *docsPath = [NSTemporaryDirectory() stringByStandardizingPath];
+    NSFileManager *fileMgr = [[NSFileManager alloc] init];
+    NSString *filePath;
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    
+    int i = 1;
+    do {
+        filePath = [NSString stringWithFormat:@"%@/%@%03d.%@", docsPath, CDV_PHOTO_PREFIX, i++, @"jpg"];
+    } while ([fileMgr fileExistsAtPath:filePath]);
+    
+    
+    PHPickerResult *result = [results objectAtIndex:0];
+    NSLog(@"result: %@", result);
+    [result.itemProvider loadObjectOfClass:[UIImage class] completionHandler:^(__kindof id<NSItemProviderReading>  _Nullable object, NSError * _Nullable error) {
+        NSLog(@"object: %@, error: %@", object, error);
+
+        if ([object isKindOfClass:[UIImage class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSData *data = nil;
+                CGSize targetSize = CGSizeMake(self.width, self.height);
+                UIImage *image = (UIImage*)object;
+                CDVPluginResult *cdvResult = nil;
+                NSError *err = nil;
+                NSMutableArray *resultStrings = [[NSMutableArray alloc] init];
+                if (self.width == 0 && self.height == 0) {
+                    data = UIImageJPEGRepresentation(image, self.quality / 100.0f);
+                } else {
+                    UIImage *scaledImage = [self imageByScalingNotCroppingForSize:image toSize:targetSize];
+                    data = UIImageJPEGRepresentation(scaledImage, self.quality / 100.0f);
+                }
+                if (![data writeToFile:filePath options:NSAtomicWrite error:&err]) {
+                    cdvResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_IO_EXCEPTION messageAsString:[err localizedDescription]];
+                } else {
+                    [resultStrings addObject:[[NSURL fileURLWithPath:filePath] absoluteString]];
+                    cdvResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:resultStrings];
+                }
+                [self.commandDelegate sendPluginResult:cdvResult callbackId:self.callbackId];
+            });
+        }
+    }];
+    }
+}
 @end
