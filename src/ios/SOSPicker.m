@@ -226,10 +226,17 @@
 -(void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results{
     if (@available(iOS 14.0, *)) {
     NSLog(@"-picker:%@ didFinishPicking:%@", picker, results);
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    if (results.count == 0) {
+        CDVPluginResult *pluginResult = nil;
+        NSArray *emptyArray = [NSArray array];
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:emptyArray];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:self.callbackId];
+        return;
+    }
     NSString *docsPath = [NSTemporaryDirectory() stringByStandardizingPath];
     NSFileManager *fileMgr = [[NSFileManager alloc] init];
     NSString *filePath;
-    [picker dismissViewControllerAnimated:YES completion:nil];
     
     int i = 1;
     do {
